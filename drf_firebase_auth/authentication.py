@@ -3,8 +3,9 @@
 Authentication backend for handling firebase user.idToken from incoming
 Authorization header, verifying, and locally authenticating
 """
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 import logging
+from pathlib import Path
 
 import firebase_admin
 from firebase_admin import auth as firebase_auth
@@ -28,12 +29,32 @@ from . import __title__
 log = logging.getLogger(__title__)
 User = get_user_model()
 
-firebase_credentials = firebase_admin.credentials.Certificate(
-    api_settings.FIREBASE_SERVICE_ACCOUNT_KEY
-)
-firebase = firebase_admin.initialize_app(
-    credential=firebase_credentials,
-)
+firebase = None
+
+multiple_accounts = api_settings.user_settings.get('FIREBASE_SERVICE_MULTIPLE_ACCOUNTS')
+service_account = api_settings.user_settings.get('FIREBASE_SERVICE_ACCOUNT_KEY')
+
+if multiple_accounts and service_account:
+    raise Exception('FIREBASE_SERVICE_MULTIPLE_ACCOUNTS cannot be used together with FIREBASE_SERVICE_ACCOUNT_KEY.')
+
+
+if multiple_accounts:
+    for account in multiple_accounts:
+        try:
+            file = Path(account["key"]).resolve()
+            print(file)
+            firebase_credentials = firebase_admin.credentials.Certificate(cert=str(file))
+            firebase_admin.initialize_app(
+                credential=firebase_credentials,
+                name=str(account["tenant"])
+            )
+        except FileNotFoundError:
+            raise Exception("FIREBASE key not found")
+else:
+    firebase_credentials = firebase_admin.credentials.Certificate(
+        api_settings.FIREBASE_SERVICE_ACCOUNT_KEY
+    )
+    firebase_admin.initialize_app(credential=firebase_credentials)
 
 
 class FirebaseAuthentication(authentication.TokenAuthentication):
@@ -41,6 +62,17 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
     Token based authentication using firebase.
     """
     keyword = api_settings.FIREBASE_AUTH_HEADER_PREFIX
+
+    def __init__(self):
+        self.app = None
+
+    def authenticate(self, request):
+        tenant = request.headers.get('Tenant')
+        try:
+            self.app = firebase_admin.get_app(name=(tenant if tenant else '[DEFAULT]'))
+        except ValueError:
+            self.app = firebase_admin.get_app('[DEFAULT]')
+        return super(FirebaseAuthentication, self).authenticate(request)
 
     def authenticate_credentials(
         self,
@@ -63,6 +95,7 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
         try:
             decoded_token = firebase_auth.verify_id_token(
                 token,
+                app=self.app,
                 check_revoked=api_settings.FIREBASE_CHECK_JWT_REVOKED
             )
             log.info(f'_decode_token - decoded_token: {decoded_token}')
@@ -79,7 +112,7 @@ class FirebaseAuthentication(authentication.TokenAuthentication):
         try:
             uid = decoded_token.get('uid')
             log.info(f'_authenticate_token - uid: {uid}')
-            firebase_user = firebase_auth.get_user(uid)
+            firebase_user = firebase_auth.get_user(uid, app=self.app)
             log.info(f'_authenticate_token - firebase_user: {firebase_user}')
             if api_settings.FIREBASE_AUTH_EMAIL_VERIFICATION:
                 if not firebase_user.email_verified:

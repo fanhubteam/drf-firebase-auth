@@ -10,6 +10,8 @@ from .utils import map_firebase_uid_to_username
 USER_SETTINGS = getattr(settings, 'DRF_FIREBASE_AUTH', None)
 
 DEFAULTS = {
+    'FIREBASE_SERVICE_MULTIPLE_ACCOUNTS':
+        os.getenv('FIREBASE_SERVICE_MULTIPLE_ACCOUNTS', []),
     # allow anonymous requests without Authorization header set
     'ALLOW_ANONYMOUS_REQUESTS': os.getenv('ALLOW_ANONYMOUS_REQUESTS', False),
     # path to JSON file with firebase secrets
