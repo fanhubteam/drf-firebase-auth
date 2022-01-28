@@ -42,7 +42,6 @@ if multiple_accounts:
     for account in multiple_accounts:
         try:
             file = Path(account["key"]).resolve()
-            print(file)
             firebase_credentials = firebase_admin.credentials.Certificate(cert=str(file))
             firebase_admin.initialize_app(
                 credential=firebase_credentials,
